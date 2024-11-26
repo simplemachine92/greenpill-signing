@@ -16,16 +16,17 @@ import {
   Form,
   List,
   Pagination,
+  Table,
 } from "antd";
 import { ethers } from "ethers";
 import React, { useEffect, useState } from "react";
 import { useHistory, useLocation } from "react-router-dom";
-import { useLocalStorage } from "../hooks";
-import { AddressInput, Address } from "../components";
 import { initializeApp } from "firebase/app";
 import { getAuth, signInWithEmailAndPassword, onAuthStateChanged } from "firebase/auth";
 import { getDatabase, ref, set, get, child } from "firebase/database";
 import { Share } from "react-twitter-widgets";
+import { AddressInput, Address, Footer, Quotes, SignOptions, Address2 } from "../components";
+import { useLocalStorage } from "../hooks";
 import Tweets from "./Tweets";
 
 const { Text } = Typography;
@@ -45,7 +46,65 @@ export default function Signator({
   events,
 }) {
   const [list, setList] = useState();
-  //prettier-ignore
+  const [ready, setReady] = useState(false);
+  const [value2, setValue2] = useState("");
+
+  const [dataSource2, setDataSource2] = useState(events);
+
+  const FilterByNameInput2 = (
+    <Input
+      className="w-2/3"
+      placeholder="Sort by ENS or 0x.."
+      value={value2}
+      onChange={e => {
+        console.log("curr", e.target.value);
+
+        const currValue = e.target.value;
+        setValue2(currValue);
+        const filteredData = events.filter(entry => entry.args[0].includes(currValue));
+        setDataSource2(filteredData);
+
+        // Check if an input ENS resolves
+        if (e.target.value.startsWith("0")) {
+        } else {
+          mainnetProvider.resolveName(e.target.value).then(function (address2) {
+            console.log("Address: " + address2);
+            if (address2 == null) {
+              console.log("No record for this ENS");
+              setDataSource2(events);
+            } else {
+              const filteredData2 = events.filter(entry => entry.args[0].includes(address2));
+              setDataSource2(filteredData2);
+            }
+          });
+          /* console.log("ensName", ensName) */
+        }
+      }}
+    />
+  );
+
+  const columns2 = [
+    {
+      title: FilterByNameInput2,
+      dataIndex: "args",
+      render: record =>
+        record != undefined ? <Address2 value={record[0]} fontSize={14} ensProvider={mainnetProvider} /> : <Spin />,
+      key: "1",
+    },
+
+    {
+      title: "Donation",
+      dataIndex: "args",
+      key: "donation",
+      render: value => {
+        return ethers.utils.formatEther(ethers.BigNumber.from(value[1]));
+      },
+      sorter: (a, b) => a.args[1] - b.args[1],
+      sortDirections: ["ascend", "descend"],
+    },
+  ];
+
+  // prettier-ignore
   const eip712Example = {
   types: {
     signature: [
@@ -58,7 +117,7 @@ export default function Signator({
   },
   primaryType: "signature",
   domain: {
-    name: "GreenPill_Pages",
+    name: "ProofOfStake_Pages",
     version: "0",
     chainId: 4,
     verifyingContract: "0x0f40dee08808fbb178EE43824988148b33A0d7b8",
@@ -118,20 +177,19 @@ export default function Signator({
         const errorCode = error.code;
         const errorMessage = error.message;
       });
-    console.log("Success:", values);
   };
 
   const onFinishFailed = errorInfo => {
     console.log("Failed:", errorInfo);
   };
 
-  let dbList = [];
+  const dbList = [];
 
-  let objectList = [];
+  const objectList = [];
 
-  let eventList = [];
+  const eventList = [];
 
-  let toSign = [];
+  const toSign = [];
 
   function useSearchParams() {
     const _params = new URLSearchParams(useLocation().search);
@@ -153,16 +211,16 @@ export default function Signator({
       },
       primaryType: "signature",
       domain: {
-        name: "GreenPill_Pages",
+        name: "ProofOfStake_Pages",
         version: "0",
-        chainId: 4,
-        verifyingContract: contracts.GreenPill_Pages.address,
+        chainId: 31337,
+        verifyingContract: contracts.ProofOfStake_Pages.address,
       },
       message: {
-        sender: "0xb010ca9Be09C382A9f31b79493bb232bCC319f01",
+        sender: `${address}`,
         recipient: `${list[0].args[0]}`,
         pledge: `${pledgeValue}`,
-        timestamp: `${Date.now()}`,
+        timestamp: String(Date.now()),
         msg: messageText,
       },
     };
@@ -175,16 +233,6 @@ export default function Signator({
   const getMessage = () => {
     const _message = messageText;
 
-    /*
-    if (metaData === "time") {
-      _message = `${messageDate.toLocaleString()}: ${messageText}`;
-    } else if (metaData == "block") {
-      _message = `${latestBlock}: ${messageText}`;
-    } else {
-      _message = messageText;
-    }
-    */
-
     if (hashMessage) {
       return ethers.utils.keccak256(ethers.utils.toUtf8Bytes(_message)); // _message//ethers.utils.hashMessage(_message)
     }
@@ -193,10 +241,10 @@ export default function Signator({
 
   useEffect(async () => {
     const dbRef = ref(getDatabase(app));
-    get(child(dbRef, `gp/`)).then(snapshot => {
+    get(child(dbRef, `PoS/`)).then(snapshot => {
       if (snapshot.exists()) {
         snapshot.forEach(sig => {
-          let message = sig.val().message;
+          const message = sig.val().message;
           dbList.push(message.recipient);
         });
         console.log("dblist", dbList);
@@ -213,13 +261,14 @@ export default function Signator({
                 // push to to-do
                 toSign.push(objectList[x]);
                 setList(toSign);
+                console.log("aalist", toSign);
               }
             }
           });
         }
       }
     });
-  }, [events]);
+  }, [events, address]);
 
   useEffect(() => {
     if (typedData) {
@@ -243,6 +292,7 @@ export default function Signator({
       setSigning(true);
 
       const injectedSigner = action === "sign" && injectedProvider.getSigner();
+      console.log("signer", injectedProvider.getSigner);
 
       let _signature;
       if (type === "typedData") {
@@ -257,7 +307,7 @@ export default function Signator({
         const _compressedData = await codec.compress(_typedData);
 
         const db = database;
-        set(ref(db, "gp/" + _typedData.message.recipient), {
+        set(ref(db, `PoS/` + _typedData.message.recipient), {
           signature: _signature,
           message: _typedData.message,
           typedData: _compressedData,
@@ -288,7 +338,7 @@ export default function Signator({
       }
 
       window.location.reload(false);
-      //history.push(`/view?${searchParams.toString()}`);
+      // history.push(`/view?${searchParams.toString()}`);
 
       setSigning(false);
     } catch (e) {
@@ -304,6 +354,46 @@ export default function Signator({
       }
     }
   };
+  const Expander = props => <span>Test expander</span>;
+
+  const [select, setSelect] = useState({
+    selectedRowKeys: [],
+    loading: false,
+  });
+
+  const { selectedRowKeys, loading } = select;
+
+  const rowSelection = {
+    selectedRowKeys,
+    onChange: selectedRowKeys => {
+      console.log("sel", selectedRowKeys);
+      setSelect({
+        ...select,
+        selectedRowKeys,
+      });
+      console.log("eventc", events);
+      const filtered = Object.keys(events)
+        .filter(key => selectedRowKeys.includes(key))
+        .reduce((obj, key) => {
+          obj = events[key];
+          return obj;
+        }, {});
+      console.log("flt", filtered);
+      setList([filtered]);
+    },
+    type: "radio",
+  };
+
+  useEffect(async () => {
+    Object.keys(events).forEach(key => {
+      events[key].key = key;
+      console.log("wat3", key, events[key]);
+    });
+    setDataSource2(events);
+    setReady(true);
+    console.log("eventsS", events);
+    console.log("tosign", toSign);
+  }, [list]);
 
   return (
     <div
@@ -316,115 +406,139 @@ export default function Signator({
       }}
     >
       {userReady ? (
-        <Row>
-          <Col span={12}>
-            <Card>
-              {type === "message" && (
-                <Input.TextArea
-                  style={{ fontSize: 18 }}
-                  size="large"
-                  autoSize={{ minRows: 1 }}
-                  value={messageText}
-                  onChange={e => {
-                    setMessageText(e.target.value);
-                  }}
-                />
-              )}
-              <h1>Signing to:</h1>
-              <Space direction="vertical" style={{ width: "auto" }}>
-                <div
-                  style={{
-                    width: "10px auto",
-                    margin: "10px auto",
-                    paddingLeft: 20,
-                    paddingRight: 20,
-                    paddingBottom: 20,
-                  }}
-                >
-                  <List
-                    bordered
-                    dataSource={list}
-                    split={false}
-                    pagination={{
-                      defaultPageSize: "1",
-                      total: "1",
-                      hideOnSinglePage: true,
+        <>
+          <Row>
+            <Col span={12}>
+              <Card>
+                {type === "message" && (
+                  <Input.TextArea
+                    style={{ fontSize: 18 }}
+                    size="large"
+                    autoSize={{ minRows: 1 }}
+                    value={messageText}
+                    onChange={e => {
+                      setMessageText(e.target.value);
                     }}
-                    renderItem={item => (
-                      <List.Item key={item}>
-                        <Address
-                          value={item.args[0]}
-                          ensProvider={mainnetProvider}
-                          fontSize={32}
-                          style={{ display: "flex", flex: 1, alignItems: "center" }}
-                        />
-                      </List.Item>
-                    )}
                   />
-                </div>
-              </Space>
-              {type === "typedData" && (
-                <>
-                  <h1>Message:</h1>
-                  <Space direction="vertical" style={{ width: "50%" }}>
-                    <Input.TextArea
-                      style={{ fontSize: 18 }}
-                      size="large"
-                      autoSize={{ minRows: 1 }}
-                      value={messageText}
-                      onChange={e => {
-                        setMessageText(e.target.value);
+                )}
+                <h1>Queued / Selected:</h1>
+                <Space direction="vertical" style={{ width: "auto" }}>
+                  <div
+                    style={{
+                      width: "10px auto",
+                      margin: "10px auto",
+                      paddingLeft: 20,
+                      paddingRight: 20,
+                      paddingBottom: 20,
+                    }}
+                  >
+                    <List
+                      bordered
+                      dataSource={list}
+                      split={false}
+                      pagination={{
+                        defaultPageSize: "1",
+                        total: "1",
+                        hideOnSinglePage: true,
                       }}
+                      renderItem={item => (
+                        <List.Item key={item}>
+                          <Address
+                            value={item.args[0]}
+                            ensProvider={mainnetProvider}
+                            fontSize={32}
+                            style={{ display: "flex", flex: 1, alignItems: "center" }}
+                          />
+                        </List.Item>
+                      )}
                     />
-                    {invalidJson && <Alert message="Invalid Json" type="error" />}
-                    {/* typedDataChecks.domain===false&&<Alert message="No domain specified" type="info" /> */}
-                    {typedDataChecks.types === false && <Alert message="Missing types" type="error" />}
-                    {typedDataChecks.message === false && <Alert message="Missing message" type="error" />}
-                    {!invalidJson && !typedDataChecks.hash && (
-                      <Alert message="Invalid EIP-712 input data" type="error" />
-                    )}
-                  </Space>
-                </>
-              )}
-              <Collapse ghost></Collapse>
-              <Space>
-                <Button
-                  size="large"
-                  type="primary"
-                  onClick={action !== "sign" ? signMessage : injectedProvider ? signMessage : loadWeb3Modal}
-                  disabled={
-                    (type === "typedData" && (!typedDataChecks.hash || invalidJson)) ||
-                    (action === "verify" && (!ethers.utils.isAddress(manualAddress) || !manualSignature))
-                  }
-                  loading={signing}
-                  style={{ marginTop: 10 }}
-                >
-                  {action !== "sign" ? action : injectedProvider ? action : "Connect account to sign"}
-                </Button>
-                {signing && (
+                  </div>
+                </Space>
+                {type === "typedData" && (
+                  <>
+                    <h1>Message:</h1>
+                    <Space direction="vertical" style={{ width: "50%" }}>
+                      <Input.TextArea
+                        style={{ fontSize: 18 }}
+                        maxLength={60}
+                        showCount
+                        size="large"
+                        autoSize={{ minRows: 1 }}
+                        value={messageText}
+                        onChange={e => {
+                          setMessageText(e.target.value);
+                        }}
+                      />
+                      {invalidJson && <Alert message="Invalid Json" type="error" />}
+                      {/* typedDataChecks.domain===false&&<Alert message="No domain specified" type="info" /> */}
+                      {typedDataChecks.types === false && <Alert message="Missing types" type="error" />}
+                      {typedDataChecks.message === false && <Alert message="Missing message" type="error" />}
+                      {!invalidJson && !typedDataChecks.hash && (
+                        <Alert message="Invalid EIP-712 input data" type="error" />
+                      )}
+                    </Space>
+                  </>
+                )}
+                <Collapse ghost />
+                <Space>
                   <Button
                     size="large"
-                    onClick={() => {
-                      setSigning(false);
-                    }}
+                    type="primary"
+                    onClick={action !== "sign" ? signMessage : injectedProvider ? signMessage : loadWeb3Modal}
+                    disabled={
+                      (type === "typedData" && (!typedDataChecks.hash || invalidJson)) ||
+                      (action === "verify" && (!ethers.utils.isAddress(manualAddress) || !manualSignature))
+                    }
+                    loading={signing}
                     style={{ marginTop: 10 }}
                   >
-                    Cancel
+                    {action !== "sign" ? action : injectedProvider ? action : "Connect account to sign"}
                   </Button>
-                )}
-              </Space>
-            </Card>
-          </Col>
+                  {signing && (
+                    <Button
+                      size="large"
+                      onClick={() => {
+                        setSigning(false);
+                      }}
+                      style={{ marginTop: 10 }}
+                    >
+                      Cancel
+                    </Button>
+                  )}
+                </Space>
+              </Card>
+            </Col>
 
-          <Col span={12}>
-            <Tweets
-              address={address}
-              mainnetProvider={mainnetProvider}
-              firebaseConfig={firebaseConfig}
-              events={events}
-            />
-          </Col>
-        </Row>
+            <Col span={12}>
+              <Tweets
+                address={address}
+                mainnetProvider={mainnetProvider}
+                firebaseConfig={firebaseConfig}
+                events={events}
+              />
+            </Col>
+          </Row>
+
+          <div className="" style={{ height: "auto", width: "auto", marginTop: 20 }}>
+            {ready ? (
+              <div className="mx-auto mr-1 ml-1">
+                <h6 className="text-yellow-pos font-bold text-3xl mt-5">Select a User to Sign</h6>
+                <br />
+                <Table
+                  pagination={{ pageSize: 5 }}
+                  columns={columns2}
+                  dataSource={dataSource2}
+                  rowSelection={rowSelection}
+                />
+                <Footer />
+              </div>
+            ) : (
+              <div>
+                <Spin className="mt-5" />
+              </div>
+            )}
+          </div>
+        </>
       ) : (
         <div style={{ margintop: 50 }}>
           <Form
